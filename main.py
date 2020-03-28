@@ -20,13 +20,13 @@ np.random.seed(42)
 
 IMAGE_SIZE = 28
 NUM_LABELS = 10
-NUM_CHANNGELS = 1 # grayscale
+NUM_CHANNELS = 1 # grayscale
 
 
 class Reshaper(TransformerMixin):
 
     def transform(self, X, *_):
-        X = X.reshape((-1, IMAGE_SIZE, IMAGE_SIZE, NUM_CHANNGELS))
+        X = X.reshape((-1, IMAGE_SIZE, IMAGE_SIZE, NUM_CHANNELS))
         return X
 
     def fit(self, *_):
@@ -35,13 +35,13 @@ class Reshaper(TransformerMixin):
 
 class AlexNet(BaseEstimator):
 
-    def __init__(self, index):
-        self._path = 'output/alexnet_{}.h5'.format(index)
+    def __init__(self):
+        self._path = 'output/alexnet.h5'
 
     def fit(self, X, y):
         model = self._create_model()
         y = pd.get_dummies(y).values
-        model.fit(X, y, batch_size=64, epochs=3, verbose=1, validation_split=0.1, shuffle=True)
+        model.fit(X, y, batch_size=64, epochs=1, verbose=1, validation_split=0.1, shuffle=True)
         model.save(self._path)
 
     def predict(self, X):
@@ -92,8 +92,9 @@ class AlexNet(BaseEstimator):
 
         # Passing it to a dense layer
         model.add(Flatten())
+
         # 1st Dense Layer
-        model.add(Dense(4096, input_shape=(256,)))
+        model.add(Dense(4096))
         model.add(Activation('relu'))
         # Add Dropout to prevent overfitting
         model.add(Dropout(0.4))
@@ -154,7 +155,7 @@ def test_data():
 def make_model():
     return Pipeline([
         ('reshaper', Reshaper()),
-        ('model', VotingClassifier([("model_{}".format(i), AlexNet(i)) for i in range(20)])),
+        ('model', AlexNet()),
     ])
 
 
