@@ -1,4 +1,7 @@
 import os
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID" 
+os.environ['CUDA_VISIBLE_DEVICES'] = ""
+
 import argparse
 import pickle
 import pylab as plt
@@ -15,6 +18,10 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Activation, Dropout, Flatten, Conv2D, MaxPooling2D, BatchNormalization
+from tensorflow.keras.optimizers import SGD
+from googlenet import create_googlenet
+from PIL import Image
+
 
 np.random.seed(42)
 
@@ -26,8 +33,20 @@ NUM_CHANNELS = 1 # grayscale
 class Reshaper(TransformerMixin):
 
     def transform(self, X, *_):
-        X = X.reshape((-1, IMAGE_SIZE, IMAGE_SIZE, NUM_CHANNELS))
-        return X
+        X_out = []
+        for i, img in enumerate(X):
+            img = img.reshape((IMAGE_SIZE, IMAGE_SIZE, NUM_CHANNELS))
+            img = np.pad(img, ((98, 98),(98, 98),(1, 1)), 'constant')
+#            print(img.shape)
+#            img = np.array(Image.fromarray(img).resize((224, 224))).astype(np.float32)
+            img[:, :, 0] -= 123.68
+#            img[:, :, 1] -= 116.779
+#            img[:, :, 2] -= 103.939
+            img[:,:,[0,1,2]] = img[:,:,[2,1,0]]
+            img = img.transpose((2, 0, 1))
+            img = np.expand_dims(img, axis=0)
+            X_out.append(img)
+        return np.array(X_out)
 
     def fit(self, *_):
         return self
@@ -36,97 +55,24 @@ class Reshaper(TransformerMixin):
 class AlexNet(BaseEstimator):
 
     def __init__(self):
-        self._path = 'output/alexnet.h5'
+        self._path = 'output/googlenet.h5'
 
     def fit(self, X, y):
-        model = self._create_model()
         y = pd.get_dummies(y).values
+        sgd = SGD(lr=0.1, decay=1e-6, momentum=0.9, nesterov=True)
+        model = self._create_model()
+        model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
         model.fit(X, y, batch_size=64, epochs=1, verbose=1, validation_split=0.1, shuffle=True)
         model.save(self._path)
 
     def predict(self, X):
         model = keras.models.load_model(self._path)
-        y = model.predict(X)
+        y = model.predict(X)[2]
         return np.argmax(y, axis=1)
 
     def _create_model(self):
         # (3) Create a sequential model
-        model = Sequential()
-
-        # 1st Convolutional Layer
-        model.add(Conv2D(filters=96, input_shape=(28,28,1), kernel_size=(3,3),
-                         strides=(1,1), padding='valid'))
-        model.add(Activation('relu'))
-        # Pooling 
-        model.add(MaxPooling2D(pool_size=(2,2), strides=(2,2), padding='valid'))
-        # Batch Normalisation before passing it to the next layer
-        model.add(BatchNormalization())
-
-        # 2nd Convolutional Layer
-        model.add(Conv2D(filters=256, kernel_size=(3,3), strides=(1,1), padding='valid'))
-        model.add(Activation('relu'))
-        # Pooling
-        model.add(MaxPooling2D(pool_size=(2,2), strides=(2,2), padding='valid'))
-        # Batch Normalisation
-        model.add(BatchNormalization())
-
-        # 3rd Convolutional Layer
-        model.add(Conv2D(filters=384, kernel_size=(2,2), strides=(1,1), padding='valid'))
-        model.add(Activation('relu'))
-        # Batch Normalisation
-        model.add(BatchNormalization())
-
-        # 4th Convolutional Layer
-        model.add(Conv2D(filters=384, kernel_size=(2,2), strides=(1,1), padding='valid'))
-        model.add(Activation('relu'))
-        # Batch Normalisation
-        model.add(BatchNormalization())
-
-        # 5th Convolutional Layer
-        model.add(Conv2D(filters=256, kernel_size=(2,2), strides=(1,1), padding='valid'))
-        model.add(Activation('relu'))
-        # Pooling
-        model.add(MaxPooling2D(pool_size=(2,2), strides=(2,2), padding='valid'))
-        # Batch Normalisation
-        model.add(BatchNormalization())
-
-        # Passing it to a dense layer
-        model.add(Flatten())
-
-        # 1st Dense Layer
-        model.add(Dense(4096))
-        model.add(Activation('relu'))
-        # Add Dropout to prevent overfitting
-        model.add(Dropout(0.4))
-        # Batch Normalisation
-        model.add(BatchNormalization())
-
-        # 2nd Dense Layer
-        model.add(Dense(4096))
-        model.add(Activation('relu'))
-        # Add Dropout
-        model.add(Dropout(0.4))
-        # Batch Normalisation
-        model.add(BatchNormalization())
-
-        # 3rd Dense Layer
-        model.add(Dense(1000))
-        model.add(Activation('relu'))
-        # Add Dropout
-        model.add(Dropout(0.4))
-        # Batch Normalisation
-        model.add(BatchNormalization())
-
-        # Output Layer
-        model.add(Dense(NUM_LABELS))
-        model.add(Activation('softmax'))
-
-        model.summary()
-
-        # (4) Compile 
-        model.compile(loss='categorical_crossentropy',
-                      optimizer='adam',
-                      metrics=['accuracy'])
+        model = create_googlenet()
         return model
 
 
@@ -141,7 +87,7 @@ class CopyTransformer(TransformerMixin):
 
 
 def train_data():
-    df = pd.read_csv('input/train.csv', dtype=np.float32)
+    df = pd.read_csv('input/train.csv', dtype=np.float32).loc[:1000, :]
     y = df['label']
     X = df.drop(['label'], axis=1)
     return X.values, y.values
